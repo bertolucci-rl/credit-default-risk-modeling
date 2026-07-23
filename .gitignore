@@ -1,0 +1,42 @@
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dados fornecidos pela empresa
+data/
+*.csv
+
+# Entrega gerada
+delivery/
+*.zip
+
+# Arquivos temporários
+tmp/
+temp/
+outputs/
+artifacts/
+*.log
+
+# IDE e sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Quarto / HTML exportado
+README.html
+README_files/
+*_files/
