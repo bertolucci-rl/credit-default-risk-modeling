@@ -1,149 +1,170 @@
 # Case Técnico — Cientista de Dados Júnior (Datarisk)
 
-Este projeto desenvolve um modelo preditivo para estimar a probabilidade de inadimplência, utilizando as bases de dados fornecidas pela Datarisk.
+Este projeto estima a probabilidade de uma cobrança ser paga com atraso de cinco dias ou mais. A unidade de previsão é uma cobrança, e a saída é um valor contínuo entre 0 e 1.
 
----
+## Estrutura dos arquivos
 
-## 1. Estrutura do Projeto
-
-- `notebook.ipynb` — Análise completa, preparação dos dados, modelagem e geração da submissão final;
-- `requirements.txt` — Dependências necessárias;
-- `submissao_case.csv` — Arquivo com as probabilidades previstas;
-- `README.md` — Documentação do projeto.
-
-A pasta `data/` **não está incluída**, conforme instruções do case.  
-O avaliador deverá criá-la e inserir os arquivos .csv originais.
-
----
-
-## 2. Como Executar o Projeto
-
-### 2.1 Estrutura esperada
-
-```
-├── notebook.ipynb
-├── requirements.txt
-├── README.md
-└── data/
+```text
+case_datarisk.ipynb   # análise, preparação, modelagem e submissão
+README.md             # documentação da solução
+requirements.txt      # dependências com versões
+submissao_case.csv    # probabilidades para a base de teste
+data/                 # bases originais fornecidas, não incluídas na entrega
 ```
 
-### 2.2 Arquivos necessários dentro da pasta `data/`
+O notebook original, o PDF do case e as bases não fazem parte da pasta de entrega.
 
-- `base_cadastral.csv`;
-- `base_info.csv`;  
-- `base_pagamentos_desenvolvimento.csv`;  
-- `base_pagamentos_teste.csv`.
+## Ambiente
 
-### 2.3 Instalação das dependências
+- Python 3.12.5
 
-```
+Instalação:
+
+```bash
+python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2.4 Execução do notebook
+## Estrutura esperada da pasta `data`
 
-Execute o notebook de cima para baixo. Ele realizará automaticamente:
+Antes da execução, crie a pasta `data/` ao lado do notebook e inclua:
 
-- leitura e consolidação das bases;
-- tratamento de valores ausentes;
-- criação de variáveis derivadas;
-- pré-processamento com ColumnTransformer;
-- modelagem com 3 algoritmos;
-- comparação das métricas;
-- validação cruzada;
-- tuning leve de hiperparâmetros;
-- geração da submissão `submissao_case.csv`.
-
----
-
-## 3. Preparação dos Dados
-
-Etapas principais:
-
-- Consolidação das bases conforme o relacionamento fornecido;  
-- Ajuste e padronização de tipos (datas, numéricas e categóricas);  
-- Feature engineering:
-  - SAFRA_ANO, SAFRA_MES;  
-  - prazo entre emissão e vencimento;  
-  - taxa relativa;  
-- Tratamento de valores ausentes:
-  - mediana (numéricas);  
-  - `"NA"` (categóricas);  
-- Codificação com OneHotEncoder;  
-- Correção do desbalanceamento com `class_weight = 'balanced'`.  
-
----
-
-## 4. Modelos Avaliados
-
-Três algoritmos supervisionados foram testados:
-
-- **Regressão Logística**;
-- **Random Forest**;
-- **XGBoost**.
-
-Todos integrados no mesmo pipeline de pré-processamento.
-
----
-
-## 5. Resultados
-
-### 5.1 Desempenho na validação
-
-| Modelo                | AUC-ROC | Log Loss |
-|----------------------|---------|----------|
-| Regressão Logística  | ~0.81   | ~0.53    |
-| XGBoost              | ~0.94   | ~0.26    |
-| **Random Forest**    | **~0.96** | **~0.11** |
-
-### 5.2 Modelo final selecionado: **Random Forest Otimizado**
-
-Motivos da escolha:
-
-- Maior AUC-ROC entre todos os modelos testados;
-- Menor Log Loss;
-- Melhor desempenho na classe minoritária;
-- Estabilidade comprovada via validação cruzada;
-- Desempenho refinado via RandomizedSearchCV.
-
-Resultados finais:
-
-- **AUC-ROC ≈ 0.9624**;
-- **Log Loss ≈ 0.1170**.
-
----
-
-## 6. Submissão
-
-O arquivo `submissao_case.csv` contém:
-
-- `ID_CLIENTE`;
-- `SAFRA_REF`;
-- `PROBABILIDADE_INADIMPLENCIA`.
-
-Formato conforme o solicitado no case.
-
----
-
-## 7. Conclusões
-
-- O desbalanceamento da variável-alvo exigiu métricas adequadas (AUC-ROC e Log Loss) e uso de `class_weight = 'balanced'`;
-- A engenharia de atributos contribuiu para o aumento da performance; 
-- O Random Forest se mostrou o modelo mais robusto, estável e eficaz;
-- A validação cruzada confirmou que o desempenho não depende de um único split;  
-- O ajuste leve via RandomizedSearchCV trouxe ganho adicional sem aumentar significativamente o custo computacional.
-
----
-
-## 8. Reprodutibilidade
-
-Para instalar as dependências:
-
-```
-pip install -r requirements.txt
+```text
+data/
+├── base_cadastral.csv
+├── base_info.csv
+├── base_pagamentos_desenvolvimento.csv
+└── base_pagamentos_teste.csv
 ```
 
-Após isso, basta executar o notebook.
+Os arquivos são lidos com separador `;`.
 
----
+## Execução
 
+Abra `case_datarisk.ipynb` e execute todas as células em ordem, a partir de um kernel reiniciado. O notebook:
+
+1. lê e valida as quatro bases;
+2. converte datas e consolida as informações;
+3. constrói o target;
+4. realiza a análise exploratória;
+5. cria features atuais e históricas;
+6. compara modelos em um holdout temporal;
+7. refina de forma contida o XGBoost selecionado;
+8. treina o pipeline final com todo o desenvolvimento;
+9. recria `submissao_case.csv`.
+
+## Definição do target
+
+```text
+DIAS_ATRASO = DATA_PAGAMENTO - DATA_VENCIMENTO
+TARGET = 1 quando DIAS_ATRASO >= 5
+TARGET = 0 caso contrário
+```
+
+O desenvolvimento não possui pagamento ou vencimento ausente. Datas cronologicamente inconsistentes são reportadas e preservadas, pois o dicionário não fornece uma regra de correção.
+
+## Resumo da EDA
+
+- 77.414 cobranças e 1.248 clientes no desenvolvimento;
+- target positivo em 7,02% das cobranças;
+- variação mensal da inadimplência entre as safras observadas;
+- múltiplas cobranças por cliente e forte sobreposição de clientes entre desenvolvimento e teste;
+- assimetria em valor a pagar e renda;
+- valores ausentes em renda e número de funcionários;
+- diferenças descritivas entre desenvolvimento e teste, sem teste formal de drift;
+- `FLAG_PF` interpretada conforme o dicionário: `X` representa pessoa física e ausência representa pessoa jurídica.
+
+## Features
+
+As features incluem:
+
+- ano e mês da safra;
+- prazo entre emissão e vencimento;
+- tempo desde o cadastro;
+- valor sobre renda;
+- valor por funcionário;
+- tipo de pessoa;
+- variáveis originais da cobrança, cadastro e informação mensal;
+- quantidade histórica de cobranças;
+- quantidade histórica de inadimplências;
+- taxa histórica de inadimplência;
+- flag de cliente sem histórico.
+
+O histórico é agregado por cliente e safra e deslocado antes de voltar às cobranças. A safra atual não participa das próprias features. Para o teste, o histórico usa somente pagamentos observados no desenvolvimento.
+
+`ID_CLIENTE`, `_ROW_ID`, datas brutas, `DATA_PAGAMENTO`, `DIAS_ATRASO` e `TARGET` não são usados como features diretas.
+
+Valores ausentes são tratados dentro dos pipelines. A Regressão Logística utiliza padronização; modelos de árvore não utilizam escala.
+
+## Validação temporal
+
+- treino: agosto de 2018 a março de 2021;
+- validação: abril a junho de 2021;
+- 70.012 linhas no treino;
+- 7.402 linhas na validação.
+
+O histórico da validação é congelado no final do treino. A base de teste não é utilizada para treinamento, seleção ou avaliação.
+
+## Modelos avaliados
+
+- Regressão Logística;
+- Random Forest sem pesos;
+- Random Forest com `class_weight="balanced"`, apenas como comparação;
+- XGBoost sem pesos.
+
+As métricas principais são Log Loss e ROC-AUC. Average Precision é usada como métrica complementar.
+
+| Modelo | Configuração | ROC-AUC | Log Loss | Average Precision |
+|---|---|---:|---:|---:|
+| XGBoost | sem pesos | 0,929133 | 0,133252 | 0,580801 |
+| Random Forest | sem pesos | 0,920540 | 0,144153 | 0,571888 |
+| Regressão Logística | sem pesos | 0,856369 | 0,170143 | 0,432904 |
+| Random Forest | balanceado | 0,928309 | 0,339570 | 0,574022 |
+
+## Modelo escolhido
+
+O candidato final é um XGBoost com:
+
+```text
+n_estimators=250
+learning_rate=0.05
+max_depth=3
+subsample=0.8
+colsample_bytree=0.8
+objective="binary:logistic"
+eval_metric="logloss"
+random_state=0
+```
+
+Foram comparadas quatro configurações. A versão com 400 árvores e `learning_rate=0.03` reduziu o Log Loss em apenas 0,000136, abaixo do ganho mínimo de 0,002 definido antes do refinamento. Por isso, a baseline mais simples foi mantida.
+
+Na validação, a probabilidade média prevista foi 5,22%, frente a uma taxa observada de 6,24%.
+
+## Submissão
+
+O notebook gera `submissao_case.csv` sem índice e com exatamente:
+
+```text
+ID_CLIENTE
+SAFRA_REF
+PROBABILIDADE_INADIMPLENCIA
+```
+
+`_ROW_ID` preserva a ordem original da base de teste. O notebook verifica quantidade de linhas, nomes das colunas, ordem, valores ausentes e intervalo das probabilidades.
+
+## Limitações
+
+- as métricas vêm de um único holdout temporal;
+- não há garantia de desempenho em períodos posteriores;
+- a probabilidade média subestima a taxa observada no holdout em aproximadamente 1,02 ponto percentual;
+- algumas datas inconsistentes foram preservadas;
+- uma categoria de DDD aparece apenas no teste;
+- importâncias do XGBoost são preditivas e não representam causalidade;
+- a solução não foi validada para uso em produção.
+
+## Reprodutibilidade
+
+- todas as sementes aleatórias utilizam `random_state=0`;
+- imputação e codificação são ajustadas dentro dos pipelines;
+- o notebook deve ser executado do início ao fim;
+- a submissão é recriada automaticamente a partir das quatro bases originais.
