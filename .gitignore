@@ -40,3 +40,31 @@ Thumbs.db
 README.html
 README_files/
 *_files/
+# AI / agent tooling
+.claude/
+.agents/
+
+# Internal notes, audits and study material
+AGENTS.md
+AUDITORIA_ANOTACAO.md
+BASELINE_AUDIT.md
+CHECKLIST.md
+README_REGENERAR_GUIA.txt
+
+# Alternative / study notebook versions
+case_datarisk_ESTUDO_COMENTADO.ipynb
+case_datarisk_notebook.ipynb
+case_datarisk_notebook_original.ipynb
+
+# Study guides
+guia_estudo_case_datarisk*
+
+# Legacy dependencies
+requirements-original.txt
+
+# Original technical-assessment material
+docs/Case DS Júnior 2025.pdf
+
+# Local working folders
+study/
+FINAL_AUDIT_files/

@@ -1,33 +1,365 @@
-# Case Técnico — Cientista de Dados Júnior (Datarisk)
+# Modelagem de Risco de Inadimplência — Datarisk
 
-Este projeto estima a probabilidade de uma cobrança ser paga com atraso de cinco dias ou mais. A unidade de previsão é uma cobrança, e a saída é um valor contínuo entre 0 e 1.
+Modelo probabilístico para estimar, **por cobrança**, o risco de pagamento com atraso de **5 dias ou mais**.  
+O projeto cobre o fluxo completo de um case de Data Science: validação das bases, EDA, engenharia de atributos, prevenção de *data leakage*, validação temporal, comparação de modelos e geração das probabilidades finais.
 
-## Estrutura dos arquivos
+**Stack:** Python 3.12.5 · pandas · scikit-learn · XGBoost · Matplotlib · Seaborn · Jupyter
+
+---
+
+## Visão geral
+
+O objetivo não é classificar uma cobrança como “boa” ou “ruim” a partir de um limiar arbitrário, mas estimar:
+
+\[
+P(\text{atraso} \geq 5\text{ dias} \mid \text{informações disponíveis no momento da cobrança})
+\]
+
+A unidade de previsão é **uma cobrança** e a saída é uma probabilidade contínua entre 0 e 1.
+
+| Indicador | Resultado |
+|---|---:|
+| Cobranças no desenvolvimento | **77.414** |
+| Clientes no desenvolvimento | **1.248** |
+| Cobranças no teste | **12.275** |
+| Taxa do evento no desenvolvimento | **7,02%** |
+| Holdout temporal | **abr/2021 → jun/2021** |
+| Modelo selecionado | **XGBoost** |
+| ROC-AUC no holdout | **0,9291** |
+| Log Loss no holdout | **0,1333** |
+| Average Precision no holdout | **0,5808** |
+
+> **Dados:** as bases originais e o enunciado/dicionário fornecidos no contexto do case não são redistribuídos neste repositório. O notebook documenta a estrutura esperada e todo o pipeline utilizado.
+
+---
+
+## O problema
+
+A variável-alvo foi construída diretamente a partir das datas de pagamento e vencimento:
 
 ```text
-case_datarisk.ipynb   # análise, preparação, modelagem e submissão
-README.md             # documentação da solução
-requirements.txt      # dependências com versões
-submissao_case.csv    # probabilidades para a base de teste
-data/                 # bases originais fornecidas, não incluídas na entrega
+DIAS_ATRASO = DATA_PAGAMENTO - DATA_VENCIMENTO
+
+TARGET = 1  se DIAS_ATRASO >= 5
+TARGET = 0  caso contrário
 ```
 
-O notebook original, o PDF do case e as bases não fazem parte da pasta de entrega.
+Foram incluídos testes explícitos para a fronteira da regra: 4 dias → 0; 5 e 6 dias → 1.
 
-## Ambiente
+O desenvolvimento cobre **agosto de 2018 a junho de 2021**. A base de teste corresponde aos meses seguintes, de **julho a novembro de 2021**. Essa estrutura temporal foi determinante para a estratégia de validação.
 
-- Python 3.12.5
+---
 
-Instalação:
+## Pipeline
+
+```mermaid
+flowchart LR
+    A[4 bases originais] --> B[Validação e merges]
+    B --> C[Construção do target]
+    C --> D[EDA]
+    D --> E[Engenharia de atributos]
+    E --> F[Split temporal]
+    F --> G[Pré-processamento em Pipeline]
+    G --> H[LogReg / Random Forest / XGBoost]
+    H --> I[Seleção no holdout]
+    I --> J[Fit no desenvolvimento completo]
+    J --> K[Probabilidades para o teste]
+```
+
+Alguns cuidados são intencionais: merges `many-to-one` são validados, a quantidade de linhas é preservada, a ordem original do teste é protegida por `_ROW_ID` e imputação/codificação são ajustadas **dentro dos pipelines**, depois da divisão temporal.
+
+---
+
+## Análise exploratória
+
+### Desbalanceamento do target
+
+A classe positiva aparece em **5.436 de 77.414 cobranças (7,02%)**.
+
+<p align="center">
+  <img src="assets/target_distribution.png" alt="Distribuição do target" width="620">
+</p>
+
+Esse desbalanceamento é uma das razões para não usar acurácia como métrica principal. Como o produto final é uma **probabilidade**, a avaliação prioriza qualidade probabilística e discriminação.
+
+### Comportamento ao longo do tempo
+
+A taxa de inadimplência não é constante entre as safras: no período analisado, variou de aproximadamente **4,14%** a **16,03%**.
+
+<p align="center">
+  <img src="assets/default_rate_over_time.png" alt="Quantidade de cobranças e taxa de inadimplência por safra" width="900">
+</p>
+
+A variação temporal reforça a escolha de um holdout futuro, em vez de um split aleatório que misturaria passado e futuro.
+
+Outros achados relevantes da EDA:
+
+- a mediana é de **28 cobranças por cliente**, com uma cauda longa de recorrência;
+- **90,98%** dos clientes do teste também aparecem no desenvolvimento;
+- `VALOR_A_PAGAR` e renda apresentam forte assimetria;
+- renda e número de funcionários possuem valores ausentes;
+- o teste apresenta valores centrais maiores em algumas variáveis, mas não foi realizado teste formal de *drift*;
+- uma categoria de `DDD` aparece somente no teste.
+
+---
+
+## Engenharia de atributos
+
+Foram mantidos atributos interpretáveis e disponíveis no momento da previsão.
+
+### Informações da cobrança e do período
+
+- ano e mês da safra;
+- valor da cobrança;
+- taxa;
+- prazo entre emissão e vencimento;
+- tempo desde o cadastro.
+
+### Informações financeiras e cadastrais
+
+- renda do mês anterior;
+- número de funcionários;
+- valor da cobrança / renda;
+- valor da cobrança / número de funcionários;
+- segmento, porte, DDD, CEP, domínio de e-mail e tipo de pessoa.
+
+### Histórico do cliente
+
+Foram construídos quatro atributos históricos:
+
+- `HIST_QTD_COBRANCAS`;
+- `HIST_QTD_INADIMPLENCIAS`;
+- `HIST_TAXA_INADIMPLENCIA`;
+- `FLAG_SEM_HISTORICO`.
+
+A parte mais importante aqui é **temporal**: primeiro as cobranças são agregadas por cliente e safra; depois os acumulados são deslocados. Assim, as features de uma safra usam somente informação de **safras anteriores**.
+
+```text
+cliente + safra atual
+        │
+        ├── cobranças anteriores
+        ├── inadimplências anteriores
+        └── taxa histórica anterior
+
+target da safra atual ──X──> features da própria safra
+```
+
+No teste, o histórico é congelado usando apenas pagamentos observados no desenvolvimento. Previsões futuras não são reutilizadas como se fossem fatos observados.
+
+---
+
+## Prevenção de data leakage
+
+A separação entre informação disponível e informação futura é um dos pontos centrais do projeto.
+
+Foram excluídos dos preditores:
+
+```text
+ID_CLIENTE
+DATA_PAGAMENTO
+DIAS_ATRASO
+TARGET
+_ROW_ID
+datas brutas usadas para construir features
+```
+
+Além disso, o notebook testa explicitamente que:
+
+- o primeiro mês de um cliente não possui histórico anterior;
+- o segundo mês utiliza apenas o primeiro;
+- a safra atual não entra nos próprios acumulados;
+- o histórico é constante dentro de cada par cliente–safra;
+- o teste não contém pagamento nem target na construção das features;
+- clientes inéditos são identificados separadamente.
+
+---
+
+## Validação temporal
+
+Como o conjunto de teste ocorre depois do desenvolvimento, a avaliação procura reproduzir esse cenário.
+
+| Conjunto | Período | Linhas | Clientes | Taxa do evento |
+|---|---|---:|---:|---:|
+| Treino | ago/2018 → mar/2021 | 70.012 | 1.194 | 7,10% |
+| Validação | abr/2021 → jun/2021 | 7.402 | 868 | 6,24% |
+| Teste | jul/2021 → nov/2021 | 12.275 | 976 | — |
+
+Para a validação, o histórico também é **congelado no final do treino**. Portanto, resultados de abril, maio ou junho de 2021 não atualizam features de outras linhas do próprio holdout.
+
+---
+
+## Modelos e métricas
+
+Foram avaliados:
+
+- Regressão Logística;
+- Random Forest;
+- Random Forest com `class_weight="balanced"`;
+- XGBoost.
+
+A Regressão Logística recebe padronização das variáveis numéricas. Os modelos de árvore recebem a mesma imputação, mas sem `StandardScaler`. Variáveis categóricas são imputadas e codificadas com `OneHotEncoder(handle_unknown="ignore")`.
+
+### Por que Log Loss?
+
+O case pede **probabilidades**, não apenas classes. Por isso, o critério principal é **Log Loss**, que penaliza probabilidades excessivamente confiantes quando estão erradas. ROC-AUC e Average Precision complementam a avaliação de discriminação.
+
+### Resultado no holdout temporal
+
+| Modelo | ROC-AUC ↑ | Log Loss ↓ | Average Precision ↑ |
+|---|---:|---:|---:|
+| **XGBoost** | **0,9291** | **0,1333** | **0,5808** |
+| Random Forest | 0,9205 | 0,1442 | 0,5719 |
+| Regressão Logística | 0,8564 | 0,1701 | 0,4329 |
+| Random Forest balanceado | 0,9283 | 0,3396 | 0,5740 |
+
+O XGBoost apresentou o melhor conjunto de resultados no holdout.
+
+Um resultado particularmente útil foi o Random Forest balanceado: os pesos elevaram discretamente ROC-AUC e Average Precision em relação ao Random Forest sem pesos, mas deslocaram a probabilidade média prevista para **28,16%**, muito acima dos **6,24%** observados na validação. O Log Loss piorou de **0,1442 para 0,3396**. Por isso, pesos de classe não foram adotados apenas pelo fato de o target ser desbalanceado.
+
+<p align="center">
+  <img src="assets/roc_curve.png" alt="Curvas ROC no holdout temporal" width="47%">
+  <img src="assets/precision_recall_curve.png" alt="Curvas Precision-Recall no holdout temporal" width="47%">
+</p>
+
+---
+
+## Modelo final
+
+O candidato selecionado foi:
+
+```python
+XGBClassifier(
+    n_estimators=250,
+    learning_rate=0.05,
+    max_depth=3,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    objective="binary:logistic",
+    eval_metric="logloss",
+    random_state=0,
+)
+```
+
+Depois da comparação inicial, foi feito um refinamento pequeno e deliberadamente limitado.
+
+Uma configuração com 400 árvores e `learning_rate=0.03` reduziu o Log Loss de **0,133252 para 0,133116**, ganho de apenas **0,000136**. Como a melhora ficou muito abaixo do ganho mínimo previamente definido e veio acompanhada de pequena redução no ROC-AUC, a baseline mais simples foi mantida.
+
+A intenção não foi extrair décimos marginais do mesmo holdout, mas evitar selecionar uma configuração mais complexa por uma diferença praticamente desprezível.
+
+---
+
+## O que o modelo está usando
+
+No XGBoost selecionado, a **taxa histórica de inadimplência do cliente** aparece como a feature de maior importância, seguida pelo valor da cobrança e pela quantidade histórica de inadimplências.
+
+<p align="center">
+  <img src="assets/feature_importance.png" alt="Principais importâncias do XGBoost" width="850">
+</p>
+
+Essas importâncias são **preditivas**, não causais. Variáveis correlacionadas podem dividir importância e categorias one-hot aparecem separadamente.
+
+---
+
+## Verificação das probabilidades
+
+No holdout:
+
+- taxa observada: **6,24%**;
+- probabilidade média prevista: **5,22%**;
+- diferença: **−1,02 ponto percentual**;
+- probabilidade mínima: **0,0017**;
+- probabilidade máxima: **0,9493**.
+
+<p align="center">
+  <img src="assets/predicted_probability_distribution.png" alt="Distribuição das probabilidades previstas na validação" width="780">
+</p>
+
+A diferença de médias sugere **subestimação global** no período de validação. Essa comparação é apenas um *sanity check*: não substitui uma análise formal de calibração por faixas de risco.
+
+---
+
+## Treinamento final e saída
+
+Após a seleção, o pipeline escolhido é reajustado com as **77.414 cobranças** do desenvolvimento e aplicado às **12.275 cobranças** do teste.
+
+O arquivo final possui exatamente:
+
+```text
+ID_CLIENTE
+SAFRA_REF
+PROBABILIDADE_INADIMPLENCIA
+```
+
+A geração inclui verificações para:
+
+- número de linhas;
+- nomes e ordem das colunas;
+- probabilidades ausentes;
+- probabilidades fora de `[0, 1]`;
+- preservação da ordem original do teste;
+- ausência de índice acidental no CSV.
+
+Como a base de teste não possui target, nenhuma métrica de desempenho é atribuída a ela.
+
+---
+
+## Decisões que mais importaram
+
+1. **Validação temporal em vez de split aleatório**  
+   O teste está cronologicamente à frente do desenvolvimento; a validação segue a mesma lógica.
+
+2. **Histórico construído apenas com o passado**  
+   O `shift` ocorre após a agregação por cliente e safra, evitando que o resultado do mês atual contamine suas próprias features.
+
+3. **Qualidade probabilística acima de métricas de limiar**  
+   Log Loss é priorizado porque a saída requerida é uma probabilidade.
+
+4. **Desbalanceamento não implica automaticamente pesos de classe**  
+   A configuração balanceada melhorou pouco a discriminação e deteriorou fortemente a escala das probabilidades.
+
+5. **Refinamento contido**  
+   Uma melhoria de Log Loss de 0,000136 não justificou trocar a configuração base por uma alternativa mais complexa.
+
+---
+
+## Estrutura do repositório
+
+```text
+case-datarisk/
+├── assets/
+│   ├── default_rate_over_time.png
+│   ├── feature_importance.png
+│   ├── precision_recall_curve.png
+│   ├── predicted_probability_distribution.png
+│   ├── roc_curve.png
+│   └── target_distribution.png
+├── case_datarisk.ipynb
+├── README.md
+├── requirements.txt
+└── .gitignore
+```
+
+`data/` e `submissao_case.csv` são artefatos locais e não precisam ser versionados.
+
+---
+
+## Como executar
+
+### 1. Criar o ambiente
 
 ```bash
 python -m venv .venv
+```
+
+Ative o ambiente e instale as dependências:
+
+```bash
 pip install -r requirements.txt
 ```
 
-## Estrutura esperada da pasta `data`
+### 2. Preparar os dados
 
-Antes da execução, crie a pasta `data/` ao lado do notebook e inclua:
+O notebook espera uma pasta `data/` na raiz do projeto:
 
 ```text
 data/
@@ -39,132 +371,58 @@ data/
 
 Os arquivos são lidos com separador `;`.
 
-## Execução
+### 3. Executar
 
-Abra `case_datarisk.ipynb` e execute todas as células em ordem, a partir de um kernel reiniciado. O notebook:
-
-1. lê e valida as quatro bases;
-2. converte datas e consolida as informações;
-3. constrói o target;
-4. realiza a análise exploratória;
-5. cria features atuais e históricas;
-6. compara modelos em um holdout temporal;
-7. refina de forma contida o XGBoost selecionado;
-8. treina o pipeline final com todo o desenvolvimento;
-9. recria `submissao_case.csv`.
-
-## Definição do target
+Abra:
 
 ```text
-DIAS_ATRASO = DATA_PAGAMENTO - DATA_VENCIMENTO
-TARGET = 1 quando DIAS_ATRASO >= 5
-TARGET = 0 caso contrário
+case_datarisk.ipynb
 ```
 
-O desenvolvimento não possui pagamento ou vencimento ausente. Datas cronologicamente inconsistentes são reportadas e preservadas, pois o dicionário não fornece uma regra de correção.
+e execute todas as células em ordem a partir de um kernel reiniciado.
 
-## Resumo da EDA
+O notebook realiza a preparação, a EDA, a engenharia de atributos, a validação temporal, o treinamento e a geração do arquivo final.
 
-- 77.414 cobranças e 1.248 clientes no desenvolvimento;
-- target positivo em 7,02% das cobranças;
-- variação mensal da inadimplência entre as safras observadas;
-- múltiplas cobranças por cliente e forte sobreposição de clientes entre desenvolvimento e teste;
-- assimetria em valor a pagar e renda;
-- valores ausentes em renda e número de funcionários;
-- diferenças descritivas entre desenvolvimento e teste, sem teste formal de drift;
-- `FLAG_PF` interpretada conforme o dicionário: `X` representa pessoa física e ausência representa pessoa jurídica.
-
-## Features
-
-As features incluem:
-
-- ano e mês da safra;
-- prazo entre emissão e vencimento;
-- tempo desde o cadastro;
-- valor sobre renda;
-- valor por funcionário;
-- tipo de pessoa;
-- variáveis originais da cobrança, cadastro e informação mensal;
-- quantidade histórica de cobranças;
-- quantidade histórica de inadimplências;
-- taxa histórica de inadimplência;
-- flag de cliente sem histórico.
-
-O histórico é agregado por cliente e safra e deslocado antes de voltar às cobranças. A safra atual não participa das próprias features. Para o teste, o histórico usa somente pagamentos observados no desenvolvimento.
-
-`ID_CLIENTE`, `_ROW_ID`, datas brutas, `DATA_PAGAMENTO`, `DIAS_ATRASO` e `TARGET` não são usados como features diretas.
-
-Valores ausentes são tratados dentro dos pipelines. A Regressão Logística utiliza padronização; modelos de árvore não utilizam escala.
-
-## Validação temporal
-
-- treino: agosto de 2018 a março de 2021;
-- validação: abril a junho de 2021;
-- 70.012 linhas no treino;
-- 7.402 linhas na validação.
-
-O histórico da validação é congelado no final do treino. A base de teste não é utilizada para treinamento, seleção ou avaliação.
-
-## Modelos avaliados
-
-- Regressão Logística;
-- Random Forest sem pesos;
-- Random Forest com `class_weight="balanced"`, apenas como comparação;
-- XGBoost sem pesos.
-
-As métricas principais são Log Loss e ROC-AUC. Average Precision é usada como métrica complementar.
-
-| Modelo | Configuração | ROC-AUC | Log Loss | Average Precision |
-|---|---|---:|---:|---:|
-| XGBoost | sem pesos | 0,929133 | 0,133252 | 0,580801 |
-| Random Forest | sem pesos | 0,920540 | 0,144153 | 0,571888 |
-| Regressão Logística | sem pesos | 0,856369 | 0,170143 | 0,432904 |
-| Random Forest | balanceado | 0,928309 | 0,339570 | 0,574022 |
-
-## Modelo escolhido
-
-O candidato final é um XGBoost com:
-
-```text
-n_estimators=250
-learning_rate=0.05
-max_depth=3
-subsample=0.8
-colsample_bytree=0.8
-objective="binary:logistic"
-eval_metric="logloss"
-random_state=0
-```
-
-Foram comparadas quatro configurações. A versão com 400 árvores e `learning_rate=0.03` reduziu o Log Loss em apenas 0,000136, abaixo do ganho mínimo de 0,002 definido antes do refinamento. Por isso, a baseline mais simples foi mantida.
-
-Na validação, a probabilidade média prevista foi 5,22%, frente a uma taxa observada de 6,24%.
-
-## Submissão
-
-O notebook gera `submissao_case.csv` sem índice e com exatamente:
-
-```text
-ID_CLIENTE
-SAFRA_REF
-PROBABILIDADE_INADIMPLENCIA
-```
-
-`_ROW_ID` preserva a ordem original da base de teste. O notebook verifica quantidade de linhas, nomes das colunas, ordem, valores ausentes e intervalo das probabilidades.
+---
 
 ## Limitações
 
-- as métricas vêm de um único holdout temporal;
-- não há garantia de desempenho em períodos posteriores;
-- a probabilidade média subestima a taxa observada no holdout em aproximadamente 1,02 ponto percentual;
-- algumas datas inconsistentes foram preservadas;
-- uma categoria de DDD aparece apenas no teste;
-- importâncias do XGBoost são preditivas e não representam causalidade;
-- a solução não foi validada para uso em produção.
+Este projeto foi construído como um case analítico e **não deve ser interpretado como um sistema pronto para produção**.
+
+Principais limitações:
+
+- os resultados vêm de um único holdout temporal;
+- não há avaliação em períodos posteriores ao teste fornecido;
+- a probabilidade média subestima a taxa observada no holdout em cerca de 1,02 p.p.;
+- foram preservadas algumas inconsistências de datas por ausência de uma regra de correção no dicionário;
+- existem diferenças descritivas entre desenvolvimento e teste, sem teste formal de drift;
+- importâncias do XGBoost não representam relações causais;
+- não foi definido um limiar operacional, pois isso exigiria custos e objetivos de negócio.
+
+---
+
+## Próximos passos
+
+Para evoluir esta solução para um cenário mais próximo de produção, eu priorizaria:
+
+- **backtesting / walk-forward validation** em múltiplas janelas temporais;
+- avaliação formal de **calibração** e, se necessário, Platt scaling ou isotonic regression;
+- monitoramento de **drift** de features e das probabilidades;
+- definição de limiares a partir de **custos de negócio**, e não de um valor fixo como 0,5;
+- análise de explicabilidade por observação e estabilidade das features em períodos futuros.
+
+---
 
 ## Reprodutibilidade
 
-- todas as sementes aleatórias utilizam `random_state=0`;
-- imputação e codificação são ajustadas dentro dos pipelines;
-- o notebook deve ser executado do início ao fim;
-- a submissão é recriada automaticamente a partir das quatro bases originais.
+- `random_state=0` nos componentes estocásticos;
+- dependências fixadas em `requirements.txt`;
+- imputação, escala e one-hot são ajustados dentro de `Pipeline`;
+- o teste não participa de treinamento, seleção ou avaliação;
+- a submissão é recriada diretamente a partir das quatro bases originais.
+
+---
+
+### Tecnologias
+
+`Python` · `pandas` · `NumPy` · `scikit-learn` · `XGBoost` · `Matplotlib` · `Seaborn` · `Jupyter`
