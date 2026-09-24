@@ -1,52 +1,52 @@
-# Modelagem de Risco de Inadimplência — Datarisk
+# Delinquency Risk Modeling — Datarisk
 
-Modelo probabilístico para estimar, **por cobrança**, o risco de pagamento com atraso de **5 dias ou mais**.  
-O projeto cobre o fluxo completo de um case de Data Science: validação das bases, EDA, engenharia de atributos, prevenção de *data leakage*, validação temporal, comparação de modelos e geração das probabilidades finais.
+Probabilistic model designed to estimate, **for each invoice**, the risk of payment being delayed by **5 days or more**.  
+The project covers the complete Data Science workflow of a technical case: data validation, EDA, feature engineering, *data leakage* prevention, temporal validation, model comparison, and final probability generation.
 
 **Stack:** Python 3.12.5 · pandas · scikit-learn · XGBoost · Matplotlib · Seaborn · Jupyter
 
 ---
 
-## Visão geral
+## Overview
 
-O objetivo não é classificar uma cobrança como “boa” ou “ruim” a partir de um limiar arbitrário, mas estimar:
+The objective is not to classify an invoice as simply “good” or “bad” based on an arbitrary threshold, but rather to estimate:
 
 \[
-P(\text{atraso} \geq 5\text{ dias} \mid \text{informações disponíveis no momento da cobrança})
+P(\text{delay} \geq 5\text{ days} \mid \text{information available at prediction time})
 \]
 
-A unidade de previsão é **uma cobrança** e a saída é uma probabilidade contínua entre 0 e 1.
+The prediction unit is **one invoice**, and the output is a continuous probability between 0 and 1.
 
-| Indicador | Resultado |
+| Metric | Result |
 |---|---:|
-| Cobranças no desenvolvimento | **77.414** |
-| Clientes no desenvolvimento | **1.248** |
-| Cobranças no teste | **12.275** |
-| Taxa do evento no desenvolvimento | **7,02%** |
-| Holdout temporal | **abr/2021 → jun/2021** |
-| Modelo selecionado | **XGBoost** |
-| ROC-AUC no holdout | **0,9291** |
-| Log Loss no holdout | **0,1333** |
-| Average Precision no holdout | **0,5808** |
+| Development invoices | **77,414** |
+| Development customers | **1,248** |
+| Test invoices | **12,275** |
+| Event rate in development data | **7.02%** |
+| Temporal holdout | **Apr/2021 → Jun/2021** |
+| Selected model | **XGBoost** |
+| Holdout ROC-AUC | **0.9291** |
+| Holdout Log Loss | **0.1333** |
+| Holdout Average Precision | **0.5808** |
 
-> **Dados:** as bases originais e o enunciado/dicionário fornecidos no contexto do case não são redistribuídos neste repositório. O notebook documenta a estrutura esperada e todo o pipeline utilizado.
+> **Data:** the original datasets and the case statement/data dictionary are not redistributed in this repository. The notebook documents the expected structure and the complete modeling pipeline.
 
 ---
 
-## O problema
+## The Problem
 
-A variável-alvo foi construída diretamente a partir das datas de pagamento e vencimento:
+The target variable was constructed directly from payment and due dates:
 
 ```text
-DIAS_ATRASO = DATA_PAGAMENTO - DATA_VENCIMENTO
+DAYS_LATE = PAYMENT_DATE - DUE_DATE
 
-TARGET = 1  se DIAS_ATRASO >= 5
-TARGET = 0  caso contrário
+TARGET = 1  if DAYS_LATE >= 5
+TARGET = 0  otherwise
 ```
 
-Foram incluídos testes explícitos para a fronteira da regra: 4 dias → 0; 5 e 6 dias → 1.
+Explicit boundary tests were included: 4 days → 0; 5 and 6 days → 1.
 
-O desenvolvimento cobre **agosto de 2018 a junho de 2021**. A base de teste corresponde aos meses seguintes, de **julho a novembro de 2021**. Essa estrutura temporal foi determinante para a estratégia de validação.
+The development data covers **August 2018 through June 2021**. The test set corresponds to the following months, from **July through November 2021**. This temporal structure was central to the validation strategy.
 
 ---
 
@@ -54,105 +54,105 @@ O desenvolvimento cobre **agosto de 2018 a junho de 2021**. A base de teste corr
 
 ```mermaid
 flowchart LR
-    A[4 bases originais] --> B[Validação e merges]
-    B --> C[Construção do target]
+    A[4 original datasets] --> B[Validation and joins]
+    B --> C[Target construction]
     C --> D[EDA]
-    D --> E[Engenharia de atributos]
-    E --> F[Split temporal]
-    F --> G[Pré-processamento em Pipeline]
+    D --> E[Feature engineering]
+    E --> F[Temporal split]
+    F --> G[Pipeline preprocessing]
     G --> H[LogReg / Random Forest / XGBoost]
-    H --> I[Seleção no holdout]
-    I --> J[Fit no desenvolvimento completo]
-    J --> K[Probabilidades para o teste]
+    H --> I[Holdout selection]
+    I --> J[Fit on full development data]
+    J --> K[Test probabilities]
 ```
 
-Alguns cuidados são intencionais: merges `many-to-one` são validados, a quantidade de linhas é preservada, a ordem original do teste é protegida por `_ROW_ID` e imputação/codificação são ajustadas **dentro dos pipelines**, depois da divisão temporal.
+Several safeguards are intentional: `many-to-one` joins are validated, row counts are preserved, the original test order is protected through `_ROW_ID`, and imputation/encoding are fitted **inside the pipelines**, after the temporal split.
 
 ---
 
-## Análise exploratória
+## Exploratory Data Analysis
 
-### Desbalanceamento do target
+### Target Imbalance
 
-A classe positiva aparece em **5.436 de 77.414 cobranças (7,02%)**.
-
-<p align="center">
-  <img src="assets/target_distribution.png" alt="Distribuição do target" width="620">
-</p>
-
-Esse desbalanceamento é uma das razões para não usar acurácia como métrica principal. Como o produto final é uma **probabilidade**, a avaliação prioriza qualidade probabilística e discriminação.
-
-### Comportamento ao longo do tempo
-
-A taxa de inadimplência não é constante entre as safras: no período analisado, variou de aproximadamente **4,14%** a **16,03%**.
+The positive class appears in **5,436 out of 77,414 invoices (7.02%)**.
 
 <p align="center">
-  <img src="assets/default_rate_over_time.png" alt="Quantidade de cobranças e taxa de inadimplência por safra" width="900">
+  <img src="assets/target_distribution.png" alt="Target distribution" width="620">
 </p>
 
-A variação temporal reforça a escolha de um holdout futuro, em vez de um split aleatório que misturaria passado e futuro.
+This imbalance is one of the reasons accuracy is not used as the main evaluation metric. Since the final output is a **probability**, the evaluation prioritizes probabilistic quality and discrimination.
 
-Outros achados relevantes da EDA:
+### Behavior Over Time
 
-- a mediana é de **28 cobranças por cliente**, com uma cauda longa de recorrência;
-- **90,98%** dos clientes do teste também aparecem no desenvolvimento;
-- `VALOR_A_PAGAR` e renda apresentam forte assimetria;
-- renda e número de funcionários possuem valores ausentes;
-- o teste apresenta valores centrais maiores em algumas variáveis, mas não foi realizado teste formal de *drift*;
-- uma categoria de `DDD` aparece somente no teste.
+The delinquency rate is not constant across cohorts: during the analyzed period, it ranged from approximately **4.14%** to **16.03%**.
+
+<p align="center">
+  <img src="assets/default_rate_over_time.png" alt="Invoice volume and delinquency rate by cohort" width="900">
+</p>
+
+This temporal variation reinforces the use of a future holdout instead of a random split that would mix past and future observations.
+
+Other relevant EDA findings:
+
+- the median is **28 invoices per customer**, with a long tail of recurring customers;
+- **90.98%** of test customers also appear in the development data;
+- `VALOR_A_PAGAR` and income are strongly right-skewed;
+- income and number of employees contain missing values;
+- the test set shows higher central values for some variables, although no formal drift test was performed;
+- one `DDD` category appears only in the test set.
 
 ---
 
-## Engenharia de atributos
+## Feature Engineering
 
-Foram mantidos atributos interpretáveis e disponíveis no momento da previsão.
+The feature set was designed to remain interpretable and to use only information available at prediction time.
 
-### Informações da cobrança e do período
+### Invoice and Time Information
 
-- ano e mês da safra;
-- valor da cobrança;
-- taxa;
-- prazo entre emissão e vencimento;
-- tempo desde o cadastro.
+- cohort year and month;
+- invoice amount;
+- rate;
+- time between issue date and due date;
+- time since customer registration.
 
-### Informações financeiras e cadastrais
+### Financial and Customer Information
 
-- renda do mês anterior;
-- número de funcionários;
-- valor da cobrança / renda;
-- valor da cobrança / número de funcionários;
-- segmento, porte, DDD, CEP, domínio de e-mail e tipo de pessoa.
+- previous-month income;
+- number of employees;
+- invoice amount / income;
+- invoice amount / number of employees;
+- segment, company size, DDD, ZIP code, email domain, and customer type.
 
-### Histórico do cliente
+### Customer History
 
-Foram construídos quatro atributos históricos:
+Four historical features were created:
 
 - `HIST_QTD_COBRANCAS`;
 - `HIST_QTD_INADIMPLENCIAS`;
 - `HIST_TAXA_INADIMPLENCIA`;
 - `FLAG_SEM_HISTORICO`.
 
-A parte mais importante aqui é **temporal**: primeiro as cobranças são agregadas por cliente e safra; depois os acumulados são deslocados. Assim, as features de uma safra usam somente informação de **safras anteriores**.
+The most important aspect is **temporal consistency**: invoices are first aggregated by customer and cohort, and cumulative values are then shifted. Therefore, the features of a given cohort use only information from **previous cohorts**.
 
 ```text
-cliente + safra atual
+customer + current cohort
         │
-        ├── cobranças anteriores
-        ├── inadimplências anteriores
-        └── taxa histórica anterior
+        ├── previous invoices
+        ├── previous delinquencies
+        └── previous historical delinquency rate
 
-target da safra atual ──X──> features da própria safra
+current-cohort target ──X──> current-cohort features
 ```
 
-No teste, o histórico é congelado usando apenas pagamentos observados no desenvolvimento. Previsões futuras não são reutilizadas como se fossem fatos observados.
+For the test set, customer history is frozen using only payments observed in the development period. Future predictions are never reused as if they were observed outcomes.
 
 ---
 
-## Prevenção de data leakage
+## Data Leakage Prevention
 
-A separação entre informação disponível e informação futura é um dos pontos centrais do projeto.
+Separating information available at prediction time from future information is one of the central aspects of the project.
 
-Foram excluídos dos preditores:
+The following variables were excluded from the predictors:
 
 ```text
 ID_CLIENTE
@@ -160,72 +160,74 @@ DATA_PAGAMENTO
 DIAS_ATRASO
 TARGET
 _ROW_ID
-datas brutas usadas para construir features
+raw dates used to construct derived features
 ```
 
-Além disso, o notebook testa explicitamente que:
+The notebook also explicitly tests that:
 
-- o primeiro mês de um cliente não possui histórico anterior;
-- o segundo mês utiliza apenas o primeiro;
-- a safra atual não entra nos próprios acumulados;
-- o histórico é constante dentro de cada par cliente–safra;
-- o teste não contém pagamento nem target na construção das features;
-- clientes inéditos são identificados separadamente.
+- a customer's first month has no previous history;
+- the second month uses only information from the first;
+- the current cohort does not enter its own cumulative statistics;
+- historical features are constant within each customer–cohort pair;
+- the test set does not contain payment information or target values during feature construction;
+- previously unseen customers are identified separately.
 
 ---
 
-## Validação temporal
+## Temporal Validation
 
-Como o conjunto de teste ocorre depois do desenvolvimento, a avaliação procura reproduzir esse cenário.
+Because the test set occurs chronologically after the development data, the evaluation strategy mirrors this scenario.
 
-| Conjunto | Período | Linhas | Clientes | Taxa do evento |
+| Dataset | Period | Rows | Customers | Event Rate |
 |---|---|---:|---:|---:|
-| Treino | ago/2018 → mar/2021 | 70.012 | 1.194 | 7,10% |
-| Validação | abr/2021 → jun/2021 | 7.402 | 868 | 6,24% |
-| Teste | jul/2021 → nov/2021 | 12.275 | 976 | — |
+| Train | Aug/2018 → Mar/2021 | 70,012 | 1,194 | 7.10% |
+| Validation | Apr/2021 → Jun/2021 | 7,402 | 868 | 6.24% |
+| Test | Jul/2021 → Nov/2021 | 12,275 | 976 | — |
 
-Para a validação, o histórico também é **congelado no final do treino**. Portanto, resultados de abril, maio ou junho de 2021 não atualizam features de outras linhas do próprio holdout.
+For validation, customer history is also **frozen at the end of the training period**. Therefore, outcomes from April, May, or June 2021 do not update features for other observations inside the holdout itself.
 
 ---
 
-## Modelos e métricas
+## Models and Metrics
 
-Foram avaliados:
+The following models were evaluated:
 
-- Regressão Logística;
+- Logistic Regression;
 - Random Forest;
-- Random Forest com `class_weight="balanced"`;
+- Random Forest with `class_weight="balanced"`;
 - XGBoost.
 
-A Regressão Logística recebe padronização das variáveis numéricas. Os modelos de árvore recebem a mesma imputação, mas sem `StandardScaler`. Variáveis categóricas são imputadas e codificadas com `OneHotEncoder(handle_unknown="ignore")`.
+Logistic Regression receives standardized numerical features. Tree-based models use the same imputation strategy but without `StandardScaler`. Categorical variables are imputed and encoded with `OneHotEncoder(handle_unknown="ignore")`.
 
-### Por que Log Loss?
+### Why Log Loss?
 
-O case pede **probabilidades**, não apenas classes. Por isso, o critério principal é **Log Loss**, que penaliza probabilidades excessivamente confiantes quando estão erradas. ROC-AUC e Average Precision complementam a avaliação de discriminação.
+The case requires **probabilities**, not only class labels. For that reason, the primary metric is **Log Loss**, which penalizes overly confident incorrect predictions. ROC-AUC and Average Precision complement the evaluation by measuring discrimination.
 
-### Resultado no holdout temporal
+### Temporal Holdout Results
 
-| Modelo | ROC-AUC ↑ | Log Loss ↓ | Average Precision ↑ |
+| Model | ROC-AUC ↑ | Log Loss ↓ | Average Precision ↑ |
 |---|---:|---:|---:|
-| **XGBoost** | **0,9291** | **0,1333** | **0,5808** |
-| Random Forest | 0,9205 | 0,1442 | 0,5719 |
-| Regressão Logística | 0,8564 | 0,1701 | 0,4329 |
-| Random Forest balanceado | 0,9283 | 0,3396 | 0,5740 |
+| **XGBoost** | **0.9291** | **0.1333** | **0.5808** |
+| Random Forest | 0.9205 | 0.1442 | 0.5719 |
+| Logistic Regression | 0.8564 | 0.1701 | 0.4329 |
+| Balanced Random Forest | 0.9283 | 0.3396 | 0.5740 |
 
-O XGBoost apresentou o melhor conjunto de resultados no holdout.
+XGBoost achieved the strongest overall performance on the temporal holdout.
 
-Um resultado particularmente útil foi o Random Forest balanceado: os pesos elevaram discretamente ROC-AUC e Average Precision em relação ao Random Forest sem pesos, mas deslocaram a probabilidade média prevista para **28,16%**, muito acima dos **6,24%** observados na validação. O Log Loss piorou de **0,1442 para 0,3396**. Por isso, pesos de classe não foram adotados apenas pelo fato de o target ser desbalanceado.
+One particularly useful result came from the balanced Random Forest: class weights slightly improved ROC-AUC and Average Precision compared with the unweighted Random Forest, but shifted the average predicted probability to **28.16%**, far above the **6.24%** event rate observed in validation. Log Loss deteriorated from **0.1442 to 0.3396**.
+
+For this reason, class weighting was not adopted simply because the target was imbalanced.
 
 <p align="center">
-  <img src="assets/roc_curve.png" alt="Curvas ROC no holdout temporal" width="47%">
-  <img src="assets/precision_recall_curve.png" alt="Curvas Precision-Recall no holdout temporal" width="47%">
+  <img src="assets/roc_curve.png" alt="ROC curves on the temporal holdout" width="47%">
+  <img src="assets/precision_recall_curve.png" alt="Precision-Recall curves on the temporal holdout" width="47%">
 </p>
 
 ---
 
-## Modelo final
+## Final Model
 
-O candidato selecionado foi:
+The selected candidate was:
 
 ```python
 XGBClassifier(
@@ -240,49 +242,49 @@ XGBClassifier(
 )
 ```
 
-Depois da comparação inicial, foi feito um refinamento pequeno e deliberadamente limitado.
+After the initial comparison, a small and deliberately limited refinement step was performed.
 
-Uma configuração com 400 árvores e `learning_rate=0.03` reduziu o Log Loss de **0,133252 para 0,133116**, ganho de apenas **0,000136**. Como a melhora ficou muito abaixo do ganho mínimo previamente definido e veio acompanhada de pequena redução no ROC-AUC, a baseline mais simples foi mantida.
+A configuration with 400 trees and `learning_rate=0.03` reduced Log Loss from **0.133252 to 0.133116**, an improvement of only **0.000136**. Since the gain was far below the minimum improvement defined beforehand and was accompanied by a slight reduction in ROC-AUC, the simpler baseline configuration was retained.
 
-A intenção não foi extrair décimos marginais do mesmo holdout, mas evitar selecionar uma configuração mais complexa por uma diferença praticamente desprezível.
+The goal was not to extract marginal improvements from the same holdout, but to avoid selecting a more complex configuration based on a practically negligible difference.
 
 ---
 
-## O que o modelo está usando
+## What the Model Is Using
 
-No XGBoost selecionado, a **taxa histórica de inadimplência do cliente** aparece como a feature de maior importância, seguida pelo valor da cobrança e pela quantidade histórica de inadimplências.
+In the selected XGBoost model, the customer's **historical delinquency rate** appears as the most important feature, followed by invoice amount and the historical number of delinquent invoices.
 
 <p align="center">
-  <img src="assets/feature_importance.png" alt="Principais importâncias do XGBoost" width="850">
+  <img src="assets/feature_importance.png" alt="Top XGBoost feature importances" width="850">
 </p>
 
-Essas importâncias são **preditivas**, não causais. Variáveis correlacionadas podem dividir importância e categorias one-hot aparecem separadamente.
+These importances are **predictive**, not causal. Correlated features may share importance, and one-hot encoded categories appear separately.
 
 ---
 
-## Verificação das probabilidades
+## Probability Checks
 
-No holdout:
+On the holdout:
 
-- taxa observada: **6,24%**;
-- probabilidade média prevista: **5,22%**;
-- diferença: **−1,02 ponto percentual**;
-- probabilidade mínima: **0,0017**;
-- probabilidade máxima: **0,9493**.
+- observed event rate: **6.24%**;
+- average predicted probability: **5.22%**;
+- difference: **−1.02 percentage points**;
+- minimum predicted probability: **0.0017**;
+- maximum predicted probability: **0.9493**.
 
 <p align="center">
-  <img src="assets/predicted_probability_distribution.png" alt="Distribuição das probabilidades previstas na validação" width="780">
+  <img src="assets/predicted_probability_distribution.png" alt="Distribution of predicted probabilities on validation data" width="780">
 </p>
 
-A diferença de médias sugere **subestimação global** no período de validação. Essa comparação é apenas um *sanity check*: não substitui uma análise formal de calibração por faixas de risco.
+The difference in means suggests **global underestimation** during the validation period. This comparison is only a *sanity check* and does not replace a formal calibration analysis across risk buckets.
 
 ---
 
-## Treinamento final e saída
+## Final Training and Output
 
-Após a seleção, o pipeline escolhido é reajustado com as **77.414 cobranças** do desenvolvimento e aplicado às **12.275 cobranças** do teste.
+After model selection, the chosen pipeline is refitted on all **77,414 development invoices** and applied to the **12,275 test invoices**.
 
-O arquivo final possui exatamente:
+The final output contains exactly:
 
 ```text
 ID_CLIENTE
@@ -290,39 +292,39 @@ SAFRA_REF
 PROBABILIDADE_INADIMPLENCIA
 ```
 
-A geração inclui verificações para:
+The generation step includes checks for:
 
-- número de linhas;
-- nomes e ordem das colunas;
-- probabilidades ausentes;
-- probabilidades fora de `[0, 1]`;
-- preservação da ordem original do teste;
-- ausência de índice acidental no CSV.
+- number of rows;
+- column names and order;
+- missing probabilities;
+- probabilities outside `[0, 1]`;
+- preservation of the original test order;
+- accidental CSV index creation.
 
-Como a base de teste não possui target, nenhuma métrica de desempenho é atribuída a ela.
-
----
-
-## Decisões que mais importaram
-
-1. **Validação temporal em vez de split aleatório**  
-   O teste está cronologicamente à frente do desenvolvimento; a validação segue a mesma lógica.
-
-2. **Histórico construído apenas com o passado**  
-   O `shift` ocorre após a agregação por cliente e safra, evitando que o resultado do mês atual contamine suas próprias features.
-
-3. **Qualidade probabilística acima de métricas de limiar**  
-   Log Loss é priorizado porque a saída requerida é uma probabilidade.
-
-4. **Desbalanceamento não implica automaticamente pesos de classe**  
-   A configuração balanceada melhorou pouco a discriminação e deteriorou fortemente a escala das probabilidades.
-
-5. **Refinamento contido**  
-   Uma melhoria de Log Loss de 0,000136 não justificou trocar a configuração base por uma alternativa mais complexa.
+Because the test set does not contain the target, no performance metric is reported for it.
 
 ---
 
-## Estrutura do repositório
+## Most Important Modeling Decisions
+
+1. **Temporal validation instead of random splitting**  
+   The test set occurs chronologically after the development period, so validation follows the same structure.
+
+2. **Historical features built only from past information**  
+   The `shift` is applied after aggregation by customer and cohort, preventing the current month's outcome from contaminating its own features.
+
+3. **Probability quality over threshold-based metrics**  
+   Log Loss is prioritized because the required output is a probability.
+
+4. **Class imbalance does not automatically imply class weighting**  
+   The balanced configuration slightly improved discrimination but severely distorted the probability scale.
+
+5. **Conservative model refinement**  
+   A Log Loss improvement of only 0.000136 was not considered sufficient to justify replacing the baseline with a more complex configuration.
+
+---
+
+## Repository Structure
 
 ```text
 case-datarisk/
@@ -339,27 +341,27 @@ case-datarisk/
 └── .gitignore
 ```
 
-`data/` e `submissao_case.csv` são artefatos locais e não precisam ser versionados.
+`data/` and `submissao_case.csv` are local artifacts and do not need to be versioned.
 
 ---
 
-## Como executar
+## How to Run
 
-### 1. Criar o ambiente
+### 1. Create the environment
 
 ```bash
 python -m venv .venv
 ```
 
-Ative o ambiente e instale as dependências:
+Activate the environment and install the dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Preparar os dados
+### 2. Prepare the data
 
-O notebook espera uma pasta `data/` na raiz do projeto:
+The notebook expects a `data/` directory at the project root:
 
 ```text
 data/
@@ -369,60 +371,60 @@ data/
 └── base_pagamentos_teste.csv
 ```
 
-Os arquivos são lidos com separador `;`.
+The files are read using `;` as the separator.
 
-### 3. Executar
+### 3. Run the notebook
 
-Abra:
+Open:
 
 ```text
 case_datarisk.ipynb
 ```
 
-e execute todas as células em ordem a partir de um kernel reiniciado.
+and run all cells in order from a restarted kernel.
 
-O notebook realiza a preparação, a EDA, a engenharia de atributos, a validação temporal, o treinamento e a geração do arquivo final.
-
----
-
-## Limitações
-
-Este projeto foi construído como um case analítico e **não deve ser interpretado como um sistema pronto para produção**.
-
-Principais limitações:
-
-- os resultados vêm de um único holdout temporal;
-- não há avaliação em períodos posteriores ao teste fornecido;
-- a probabilidade média subestima a taxa observada no holdout em cerca de 1,02 p.p.;
-- foram preservadas algumas inconsistências de datas por ausência de uma regra de correção no dicionário;
-- existem diferenças descritivas entre desenvolvimento e teste, sem teste formal de drift;
-- importâncias do XGBoost não representam relações causais;
-- não foi definido um limiar operacional, pois isso exigiria custos e objetivos de negócio.
+The notebook performs data preparation, EDA, feature engineering, temporal validation, model training, and final output generation.
 
 ---
 
-## Próximos passos
+## Limitations
 
-Para evoluir esta solução para um cenário mais próximo de produção, eu priorizaria:
+This project was developed as an analytical case and **should not be interpreted as a production-ready system**.
 
-- **backtesting / walk-forward validation** em múltiplas janelas temporais;
-- avaliação formal de **calibração** e, se necessário, Platt scaling ou isotonic regression;
-- monitoramento de **drift** de features e das probabilidades;
-- definição de limiares a partir de **custos de negócio**, e não de um valor fixo como 0,5;
-- análise de explicabilidade por observação e estabilidade das features em períodos futuros.
+Main limitations:
 
----
-
-## Reprodutibilidade
-
-- `random_state=0` nos componentes estocásticos;
-- dependências fixadas em `requirements.txt`;
-- imputação, escala e one-hot são ajustados dentro de `Pipeline`;
-- o teste não participa de treinamento, seleção ou avaliação;
-- a submissão é recriada diretamente a partir das quatro bases originais.
+- results are based on a single temporal holdout;
+- no evaluation is available for periods after the provided test window;
+- the average predicted probability underestimates the observed holdout event rate by approximately 1.02 percentage points;
+- some inconsistent dates were preserved because the data dictionary did not define a correction rule;
+- descriptive differences exist between development and test data, but no formal drift test was performed;
+- XGBoost feature importances do not imply causal relationships;
+- no operational decision threshold was defined because this would require business costs and objectives.
 
 ---
 
-### Tecnologias
+## Next Steps
+
+To evolve this solution toward a more production-oriented setup, I would prioritize:
+
+- **backtesting / walk-forward validation** across multiple temporal windows;
+- formal **calibration** analysis and, if necessary, Platt scaling or isotonic regression;
+- **feature drift** and prediction drift monitoring;
+- threshold definition based on **business costs**, rather than an arbitrary value such as 0.5;
+- observation-level explainability and feature stability analysis across future periods.
+
+---
+
+## Reproducibility
+
+- `random_state=0` is used in stochastic components;
+- dependencies are pinned in `requirements.txt`;
+- imputation, scaling, and one-hot encoding are fitted inside `Pipeline`;
+- the test set is not used for training, model selection, or evaluation;
+- the final submission file is recreated directly from the four original datasets.
+
+---
+
+### Technologies
 
 `Python` · `pandas` · `NumPy` · `scikit-learn` · `XGBoost` · `Matplotlib` · `Seaborn` · `Jupyter`
