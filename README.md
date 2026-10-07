@@ -1,4 +1,4 @@
-# Delinquency Risk Modeling — Datarisk
+# Delinquency Risk Modeling
 
 Probabilistic model designed to estimate, **for each invoice**, the risk of payment being delayed by **5 days or more**.  
 The project covers the complete Data Science workflow of a technical case: data validation, EDA, feature engineering, *data leakage* prevention, temporal validation, model comparison, and final probability generation.
